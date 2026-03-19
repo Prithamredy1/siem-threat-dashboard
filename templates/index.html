@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SIEM Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap');
+  :root{
+    --bg:#0a0e1a;--bg2:#0f1628;--bg3:#151d35;--border:#1e2d4a;
+    --text:#e2e8f0;--muted:#64748b;--accent:#3b82f6;
+    --critical:#ef4444;--high:#f97316;--medium:#eab308;--info:#22c55e;
+    --font-mono:'JetBrains Mono',monospace;--font:'Inter',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;min-height:100vh;}
+
+  /* ── Header ── */
+  header{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+  .logo{display:flex;align-items:center;gap:10px;font-family:var(--font-mono);font-weight:700;font-size:15px;letter-spacing:0.05em;}
+  .logo-dot{width:8px;height:8px;border-radius:50%;background:var(--critical);animation:pulse 2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(239,68,68,.4)}50%{opacity:.8;box-shadow:0 0 0 6px rgba(239,68,68,0)}}
+  .header-right{display:flex;align-items:center;gap:16px;}
+  .last-updated{font-family:var(--font-mono);font-size:11px;color:var(--muted);}
+  .btn-refresh{background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;transition:opacity .2s;}
+  .btn-refresh:hover{opacity:.85;}
+
+  /* ── Layout ── */
+  .main{padding:20px 24px;max-width:1600px;margin:0 auto;}
+
+  /* ── Stat cards ── */
+  .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px;}
+  .stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;position:relative;overflow:hidden;}
+  .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
+  .stat-card.critical::before{background:var(--critical);}
+  .stat-card.high::before{background:var(--high);}
+  .stat-card.medium::before{background:var(--medium);}
+  .stat-card.info::before{background:var(--info);}
+  .stat-card.accent::before{background:var(--accent);}
+  .stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;}
+  .stat-value{font-family:var(--font-mono);font-size:28px;font-weight:700;line-height:1;}
+  .stat-sub{font-size:11px;color:var(--muted);margin-top:4px;}
+
+  /* ── Grid layout ── */
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+  .grid-3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:16px;margin-bottom:16px;}
+  @media(max-width:1100px){.grid-3,.grid-2{grid-template-columns:1fr;}}
+
+  /* ── Panels ── */
+  .panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+  .panel-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+  .panel-title{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
+  .panel-body{padding:16px;}
+  .panel-body.no-pad{padding:0;}
+  canvas{display:block;}
+
+  /* ── Alert feed ── */
+  .alert-item{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px;transition:background .15s;}
+  .alert-item:hover{background:var(--bg3);}
+  .alert-item:last-child{border-bottom:none;}
+  .sev-badge{font-family:var(--font-mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap;margin-top:2px;}
+  .sev-CRITICAL{background:rgba(239,68,68,.15);color:var(--critical);border:1px solid rgba(239,68,68,.3);}
+  .sev-HIGH{background:rgba(249,115,22,.15);color:var(--high);border:1px solid rgba(249,115,22,.3);}
+  .sev-MEDIUM{background:rgba(234,179,8,.15);color:var(--medium);border:1px solid rgba(234,179,8,.3);}
+  .sev-INFO{background:rgba(34,197,94,.15);color:var(--info);border:1px solid rgba(34,197,94,.3);}
+  .sev-LOW{background:rgba(100,116,139,.15);color:var(--muted);border:1px solid rgba(100,116,139,.3);}
+  .alert-content{flex:1;min-width:0;}
+  .alert-rule{font-size:12px;font-weight:500;color:var(--text);margin-bottom:2px;}
+  .alert-desc{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .alert-meta{font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-top:3px;}
+
+  /* ── IP table ── */
+  table{width:100%;border-collapse:collapse;}
+  th{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;}
+  td{padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;white-space:nowrap;}
+  tr:last-child td{border-bottom:none;}
+  tr:hover td{background:var(--bg3);}
+  .ip-cell{font-family:var(--font-mono);color:var(--accent);}
+  .country-cell{color:var(--muted);}
+  .count-high{color:var(--critical);font-weight:600;font-family:var(--font-mono);}
+  .count-med{color:var(--high);font-family:var(--font-mono);}
+
+  /* ── Events table ── */
+  .events-filters{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);}
+  select{background:var(--bg3);color:var(--text);border:1px solid var(--border);padding:5px 10px;border-radius:6px;font-size:12px;outline:none;}
+  .events-table td{max-width:300px;overflow:hidden;text-overflow:ellipsis;}
+  .src-badge{font-family:var(--font-mono);font-size:10px;padding:1px 6px;border-radius:3px;background:var(--bg3);border:1px solid var(--border);color:var(--muted);}
+  .pagination{display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--border);}
+  .page-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:4px 12px;border-radius:5px;cursor:pointer;font-size:12px;}
+  .page-btn:disabled{opacity:.4;cursor:default;}
+  .page-info{font-size:12px;color:var(--muted);font-family:var(--font-mono);}
+
+  /* ── Geo table ── */
+  .flag{font-size:14px;margin-right:4px;}
+
+  /* ── Loading ── */
+  .loading{text-align:center;padding:40px;color:var(--muted);font-family:var(--font-mono);font-size:12px;}
+  .spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    SIEM // THREAT DETECTION
+  </div>
+  <div class="header-right">
+    <span class="last-updated" id="lastUpdated">Loading...</span>
+    <button class="btn-refresh" onclick="refreshData()">↻ Refresh Logs</button>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Stat Cards -->
+  <div class="stats-grid" id="statsGrid">
+    <div class="loading"><span class="spinner"></span>Loading...</div>
+  </div>
+
+  <!-- Charts row -->
+  <div class="grid-3">
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Attack Timeline (24h)</span></div>
+      <div class="panel-body"><canvas id="timelineChart" height="160"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Event Types</span></div>
+      <div class="panel-body"><canvas id="typeChart" height="160"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Severity Breakdown</span></div>
+      <div class="panel-body"><canvas id="sevChart" height="160"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Alerts + Top IPs -->
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Live Alert Feed</span>
+        <span id="alertCount" style="font-family:var(--font-mono);font-size:11px;color:var(--muted);"></span>
+      </div>
+      <div class="panel-body no-pad" id="alertFeed">
+        <div class="loading"><span class="spinner"></span>Loading alerts...</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Top Attacking IPs</span></div>
+      <div class="panel-body no-pad">
+        <table>
+          <thead><tr>
+            <th>IP Address</th><th>Country</th><th>SSH Fails</th><th>Web Hits</th><th>Severity</th>
+          </tr></thead>
+          <tbody id="topIpsTable"><tr><td colspan="5" class="loading"><span class="spinner"></span>Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Geo Intelligence -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-header"><span class="panel-title">Attacker Geo Intelligence</span></div>
+    <div class="panel-body no-pad">
+      <table>
+        <thead><tr>
+          <th>IP Address</th><th>Country</th><th>City</th><th>ISP / Hosting</th>
+          <th>SSH Fails</th><th>Web Scans</th><th>Severity</th>
+        </tr></thead>
+        <tbody id="geoTable"><tr><td colspan="7" class="loading"><span class="spinner"></span>Loading geo data...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Events Log -->
+  <div class="panel" style="margin-bottom:24px;">
+    <div class="panel-header"><span class="panel-title">Raw Event Log</span></div>
+    <div class="events-filters">
+      <select id="filterSev" onchange="loadEvents(1)">
+        <option value="">All Severities</option>
+        <option value="CRITICAL">CRITICAL</option>
+        <option value="HIGH">HIGH</option>
+        <option value="MEDIUM">MEDIUM</option>
+        <option value="INFO">INFO</option>
+      </select>
+      <select id="filterSrc" onchange="loadEvents(1)">
+        <option value="">All Sources</option>
+        <option value="auth.log">auth.log</option>
+        <option value="apache.log">apache.log</option>
+      </select>
+    </div>
+    <div class="panel-body no-pad events-table">
+      <table>
+        <thead><tr>
+          <th>Timestamp</th><th>Source</th><th>IP</th><th>Event Type</th><th>Detail</th><th>Severity</th>
+        </tr></thead>
+        <tbody id="eventsTable"><tr><td colspan="6" class="loading"><span class="spinner"></span>Loading events...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button class="page-btn" id="prevBtn" onclick="loadEvents(currentPage-1)" disabled>← Prev</button>
+      <span class="page-info" id="pageInfo">—</span>
+      <button class="page-btn" id="nextBtn" onclick="loadEvents(currentPage+1)" disabled>Next →</button>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+// ── Chart instances ────────────────────────────────────────────────────────
+let timelineChart, typeChart, sevChart;
+let currentPage = 1;
+
+const SEV_COLORS = {
+  CRITICAL:'#ef4444', HIGH:'#f97316', MEDIUM:'#eab308', INFO:'#22c55e', LOW:'#64748b'
+};
+
+function sevBadge(s){
+  return `<span class="sev-badge sev-${s}">${s}</span>`;
+}
+
+// ── Summary cards ─────────────────────────────────────────────────────────
+async function loadSummary(){
+  const d = await fetch('/api/summary').then(r=>r.json());
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card critical">
+      <div class="stat-label">Critical Alerts</div>
+      <div class="stat-value" style="color:var(--critical)">${d.critical_alerts}</div>
+      <div class="stat-sub">${d.high_alerts} HIGH</div>
+    </div>
+    <div class="stat-card high">
+      <div class="stat-label">Total Alerts</div>
+      <div class="stat-value" style="color:var(--high)">${d.total_alerts}</div>
+      <div class="stat-sub">Correlation rules fired</div>
+    </div>
+    <div class="stat-card accent">
+      <div class="stat-label">Total Events</div>
+      <div class="stat-value" style="color:var(--accent)">${d.total_events.toLocaleString()}</div>
+      <div class="stat-sub">Across all log sources</div>
+    </div>
+    <div class="stat-card medium">
+      <div class="stat-label">Unique Attackers</div>
+      <div class="stat-value" style="color:var(--medium)">${d.unique_ips}</div>
+      <div class="stat-sub">${d.critical_ips} critical severity</div>
+    </div>
+    <div class="stat-card info">
+      <div class="stat-label">Top Attacker</div>
+      <div class="stat-value" style="font-size:16px;color:var(--info);font-family:var(--font-mono)">${d.top_attacker}</div>
+      <div class="stat-sub">Most active IP</div>
+    </div>
+  `;
+  document.getElementById('lastUpdated').textContent = 'Updated: '+new Date().toLocaleTimeString();
+}
+
+// ── Timeline chart ────────────────────────────────────────────────────────
+async function loadTimeline(){
+  const data = await fetch('/api/timeline').then(r=>r.json());
+  const labels = data.map(r=>r.hour_bucket||'');
+  const counts = data.map(r=>r.count);
+  const highs  = data.map(r=>r.high_count);
+  const ctx = document.getElementById('timelineChart').getContext('2d');
+  if(timelineChart) timelineChart.destroy();
+  timelineChart = new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[
+        {label:'All Events',data:counts,backgroundColor:'rgba(59,130,246,.3)',borderColor:'#3b82f6',borderWidth:1},
+        {label:'High/Critical',data:highs,backgroundColor:'rgba(239,68,68,.5)',borderColor:'#ef4444',borderWidth:1}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}},
+      scales:{
+        x:{ticks:{color:'#475569',font:{size:9},maxRotation:45},grid:{color:'#1e2d4a'}},
+        y:{ticks:{color:'#475569',font:{size:10}},grid:{color:'#1e2d4a'}}
+      }
+    }
+  });
+}
+
+// ── Event type doughnut ───────────────────────────────────────────────────
+async function loadTypeChart(){
+  const data = await fetch('/api/event_types').then(r=>r.json());
+  const ctx = document.getElementById('typeChart').getContext('2d');
+  const colors = ['#3b82f6','#ef4444','#f97316','#eab308','#22c55e','#8b5cf6'];
+  if(typeChart) typeChart.destroy();
+  typeChart = new Chart(ctx,{
+    type:'doughnut',
+    data:{
+      labels:data.map(r=>r.event_type),
+      datasets:[{data:data.map(r=>r.count),backgroundColor:colors,borderWidth:0}]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{color:'#94a3b8',font:{size:10},padding:8}}}
+    }
+  });
+}
+
+// ── Severity chart ────────────────────────────────────────────────────────
+async function loadSevChart(){
+  const data = await fetch('/api/severity_breakdown').then(r=>r.json());
+  const ctx = document.getElementById('sevChart').getContext('2d');
+  if(sevChart) sevChart.destroy();
+  sevChart = new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:data.map(r=>r.severity),
+      datasets:[{
+        data:data.map(r=>r.count),
+        backgroundColor:data.map(r=>SEV_COLORS[r.severity]||'#64748b'),
+        borderWidth:0,borderRadius:4
+      }]
+    },
+    options:{
+      indexAxis:'y',responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:'#475569',font:{size:10}},grid:{color:'#1e2d4a'}},
+        y:{ticks:{color:'#94a3b8',font:{size:11}},grid:{display:false}}
+      }
+    }
+  });
+}
+
+// ── Alert feed ────────────────────────────────────────────────────────────
+async function loadAlerts(){
+  const data = await fetch('/api/alerts').then(r=>r.json());
+  document.getElementById('alertCount').textContent = data.length+' alerts';
+  if(!data.length){
+    document.getElementById('alertFeed').innerHTML='<div class="loading">No alerts — system clean</div>';
+    return;
+  }
+  document.getElementById('alertFeed').innerHTML = data.map(a=>`
+    <div class="alert-item">
+      ${sevBadge(a.severity)}
+      <div class="alert-content">
+        <div class="alert-rule">${a.rule.replace(/_/g,' ')}</div>
+        <div class="alert-desc">${a.description}</div>
+        <div class="alert-meta">${a.ip} · ${a.timestamp.slice(0,19)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Top IPs ───────────────────────────────────────────────────────────────
+async function loadTopIPs(){
+  const data = await fetch('/api/top_ips').then(r=>r.json());
+  document.getElementById('topIpsTable').innerHTML = data.map(r=>`
+    <tr>
+      <td class="ip-cell">${r.ip}</td>
+      <td class="country-cell">${r.country||'—'}</td>
+      <td class="${r.fail_count>10?'count-high':'count-med'}">${r.fail_count}</td>
+      <td style="color:var(--muted);font-family:var(--font-mono)">${r.web_hits}</td>
+      <td>${sevBadge(r.severity)}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Geo table ─────────────────────────────────────────────────────────────
+async function loadGeo(){
+  const data = await fetch('/api/geo').then(r=>r.json());
+  if(!data.length){
+    document.getElementById('geoTable').innerHTML='<tr><td colspan="7" class="loading">No geo data available</td></tr>';
+    return;
+  }
+  document.getElementById('geoTable').innerHTML = data.map(r=>`
+    <tr>
+      <td class="ip-cell">${r.ip}</td>
+      <td>${r.country||'—'}</td>
+      <td class="country-cell">${r.city||'—'}</td>
+      <td class="country-cell" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${r.isp||'—'}</td>
+      <td class="${r.fail_count>10?'count-high':'count-med'}">${r.fail_count}</td>
+      <td style="color:var(--high);font-family:var(--font-mono)">${r.suspicious_hits}</td>
+      <td>${sevBadge(r.severity)}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Events table ──────────────────────────────────────────────────────────
+async function loadEvents(page=1){
+  currentPage = page;
+  const sev = document.getElementById('filterSev').value;
+  const src = document.getElementById('filterSrc').value;
+  const params = new URLSearchParams({page,severity:sev,source:src});
+  const data = await fetch('/api/events?'+params).then(r=>r.json());
+  const totalPages = Math.ceil(data.total/25);
+  document.getElementById('pageInfo').textContent = `Page ${page} of ${totalPages} (${data.total.toLocaleString()} events)`;
+  document.getElementById('prevBtn').disabled = page<=1;
+  document.getElementById('nextBtn').disabled = page>=totalPages;
+  if(!data.events.length){
+    document.getElementById('eventsTable').innerHTML='<tr><td colspan="6" class="loading">No events match filter</td></tr>';
+    return;
+  }
+  document.getElementById('eventsTable').innerHTML = data.events.map(e=>`
+    <tr>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">${e.timestamp}</td>
+      <td><span class="src-badge">${e.source}</span></td>
+      <td class="ip-cell">${e.ip}</td>
+      <td style="font-size:11px">${e.event_type}</td>
+      <td style="color:var(--muted);font-size:11px;max-width:300px;overflow:hidden;text-overflow:ellipsis" title="${e.detail}">${e.detail}</td>
+      <td>${sevBadge(e.severity)}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Refresh all ───────────────────────────────────────────────────────────
+async function refreshData(){
+  const btn = document.querySelector('.btn-refresh');
+  btn.textContent='Ingesting...'; btn.disabled=true;
+  try{
+    await fetch('/api/refresh',{method:'POST'});
+    await loadAll();
+  }catch(e){ alert('Refresh failed: '+e.message); }
+  btn.textContent='↻ Refresh Logs'; btn.disabled=false;
+}
+
+async function loadAll(){
+  await Promise.all([
+    loadSummary(), loadTimeline(), loadTypeChart(), loadSevChart(),
+    loadAlerts(), loadTopIPs(), loadGeo(), loadEvents(1)
+  ]);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+loadAll();
+// Auto-refresh every 60 seconds
+setInterval(()=>{ loadSummary(); loadAlerts(); }, 60000);
+</script>
+</body>
+</html>
