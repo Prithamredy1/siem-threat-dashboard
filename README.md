@@ -93,3 +93,4 @@ siem-dashboard/
 ## Legal
 
 See [DISCLAIMER.md](DISCLAIMER.md). All testing performed in isolated lab environment only.
+![SIEM Dashboard](dashboard-screenshot.png)
